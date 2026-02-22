@@ -1,0 +1,1395 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>SignSpeak — 3D Язык Жестов</title>
+<style>
+  @import url('https://fonts.googleapis.com/css2?family=Space+Mono:wght@400;700&family=Outfit:wght@300;400;600;700&display=swap');
+
+  :root {
+    --bg: #0a0a0f;
+    --surface: #12121a;
+    --border: #1e1e2e;
+    --accent: #6c5ce7;
+    --accent2: #00cec9;
+    --text: #e0e0e8;
+    --text-dim: #6b6b80;
+    --glow: rgba(108, 92, 231, 0.3);
+    --glow2: rgba(0, 206, 201, 0.3);
+  }
+
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+
+  body {
+    background: var(--bg);
+    color: var(--text);
+    font-family: 'Outfit', sans-serif;
+    min-height: 100vh;
+    overflow-x: hidden;
+  }
+
+  .noise-overlay {
+    position: fixed; inset: 0; z-index: 0; pointer-events: none; opacity: 0.03;
+    background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 256 256' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");
+  }
+
+  .app {
+    position: relative; z-index: 1;
+    display: grid;
+    grid-template-columns: 1fr 380px;
+    grid-template-rows: auto 1fr auto;
+    min-height: 100vh;
+    gap: 0;
+  }
+
+  /* Header */
+  .header {
+    grid-column: 1 / -1;
+    display: flex; align-items: center; justify-content: space-between;
+    padding: 20px 32px;
+    border-bottom: 1px solid var(--border);
+    backdrop-filter: blur(20px);
+    background: rgba(10, 10, 15, 0.8);
+  }
+
+  .logo {
+    display: flex; align-items: center; gap: 12px;
+    font-family: 'Space Mono', monospace;
+    font-size: 22px; font-weight: 700;
+    letter-spacing: -0.5px;
+  }
+
+  .logo-icon {
+    width: 40px; height: 40px;
+    background: linear-gradient(135deg, var(--accent), var(--accent2));
+    border-radius: 12px;
+    display: flex; align-items: center; justify-content: center;
+    font-size: 20px;
+  }
+
+  .status-badge {
+    display: flex; align-items: center; gap: 8px;
+    padding: 8px 16px;
+    border-radius: 100px;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    font-size: 13px; color: var(--text-dim);
+    font-family: 'Space Mono', monospace;
+  }
+
+  .status-dot {
+    width: 8px; height: 8px; border-radius: 50%;
+    background: #ff6b6b;
+    transition: background 0.3s;
+  }
+
+  .status-dot.active { background: #51cf66; box-shadow: 0 0 8px rgba(81, 207, 102, 0.5); }
+
+  /* 3D Canvas Area */
+  .canvas-area {
+    position: relative;
+    display: flex; align-items: center; justify-content: center;
+    background: radial-gradient(ellipse at center, #15152a 0%, var(--bg) 70%);
+    overflow: hidden;
+  }
+
+  .canvas-area canvas { display: block; }
+
+  .gesture-label {
+    position: absolute;
+    bottom: 32px; left: 50%; transform: translateX(-50%);
+    padding: 12px 28px;
+    background: rgba(18, 18, 26, 0.9);
+    border: 1px solid var(--border);
+    border-radius: 16px;
+    font-family: 'Space Mono', monospace;
+    font-size: 18px; font-weight: 700;
+    color: var(--accent2);
+    backdrop-filter: blur(10px);
+    text-transform: uppercase;
+    letter-spacing: 2px;
+    transition: all 0.4s cubic-bezier(0.16, 1, 0.3, 1);
+    opacity: 0;
+    transform: translateX(-50%) translateY(10px);
+  }
+
+  .gesture-label.visible {
+    opacity: 1;
+    transform: translateX(-50%) translateY(0);
+  }
+
+  /* Side Panel */
+  .side-panel {
+    display: flex; flex-direction: column;
+    border-left: 1px solid var(--border);
+    background: var(--surface);
+    overflow: hidden;
+  }
+
+  .panel-section {
+    padding: 24px;
+    border-bottom: 1px solid var(--border);
+  }
+
+  .section-title {
+    font-family: 'Space Mono', monospace;
+    font-size: 11px; text-transform: uppercase;
+    letter-spacing: 2px; color: var(--text-dim);
+    margin-bottom: 16px;
+  }
+
+  /* Transcript */
+  .transcript-area {
+    flex: 1; overflow-y: auto; padding: 24px;
+  }
+
+  .transcript-area::-webkit-scrollbar { width: 4px; }
+  .transcript-area::-webkit-scrollbar-track { background: transparent; }
+  .transcript-area::-webkit-scrollbar-thumb { background: var(--border); border-radius: 2px; }
+
+  .transcript-item {
+    padding: 12px 16px;
+    margin-bottom: 8px;
+    border-radius: 12px;
+    background: rgba(255,255,255,0.02);
+    border: 1px solid transparent;
+    font-size: 14px; line-height: 1.6;
+    animation: slideIn 0.3s ease-out;
+    transition: border-color 0.3s;
+  }
+
+  .transcript-item.active {
+    border-color: var(--accent);
+    background: rgba(108, 92, 231, 0.05);
+  }
+
+  .transcript-item .time {
+    font-family: 'Space Mono', monospace;
+    font-size: 11px; color: var(--text-dim);
+    margin-bottom: 4px;
+  }
+
+  .transcript-item .words { color: var(--text); }
+  .transcript-item .words .current-word {
+    color: var(--accent2);
+    font-weight: 600;
+    text-decoration: underline;
+    text-underline-offset: 3px;
+  }
+
+  @keyframes slideIn {
+    from { opacity: 0; transform: translateY(8px); }
+    to { opacity: 1; transform: translateY(0); }
+  }
+
+  /* Gesture Queue */
+  .gesture-queue {
+    display: flex; flex-wrap: wrap; gap: 6px;
+  }
+
+  .gesture-tag {
+    padding: 6px 12px;
+    border-radius: 8px;
+    font-size: 12px;
+    font-family: 'Space Mono', monospace;
+    background: rgba(108, 92, 231, 0.1);
+    border: 1px solid rgba(108, 92, 231, 0.2);
+    color: var(--accent);
+    transition: all 0.3s;
+  }
+
+  .gesture-tag.playing {
+    background: rgba(0, 206, 201, 0.15);
+    border-color: rgba(0, 206, 201, 0.3);
+    color: var(--accent2);
+    box-shadow: 0 0 12px var(--glow2);
+  }
+
+  /* Controls */
+  .controls {
+    grid-column: 1 / -1;
+    display: flex; align-items: center; justify-content: center; gap: 16px;
+    padding: 24px 32px;
+    border-top: 1px solid var(--border);
+    background: rgba(18, 18, 26, 0.95);
+    backdrop-filter: blur(20px);
+  }
+
+  .mic-btn {
+    width: 64px; height: 64px;
+    border-radius: 50%;
+    border: 2px solid var(--accent);
+    background: transparent;
+    color: var(--accent);
+    font-size: 24px;
+    cursor: pointer;
+    display: flex; align-items: center; justify-content: center;
+    transition: all 0.3s cubic-bezier(0.16, 1, 0.3, 1);
+    position: relative;
+  }
+
+  .mic-btn:hover {
+    background: rgba(108, 92, 231, 0.1);
+    transform: scale(1.05);
+  }
+
+  .mic-btn.recording {
+    background: var(--accent);
+    color: white;
+    box-shadow: 0 0 30px var(--glow), 0 0 60px var(--glow);
+    animation: pulse-ring 2s ease-out infinite;
+  }
+
+  @keyframes pulse-ring {
+    0% { box-shadow: 0 0 0 0 rgba(108,92,231,0.4); }
+    70% { box-shadow: 0 0 0 20px rgba(108,92,231,0); }
+    100% { box-shadow: 0 0 0 0 rgba(108,92,231,0); }
+  }
+
+  .ctrl-btn {
+    padding: 12px 24px;
+    border-radius: 12px;
+    border: 1px solid var(--border);
+    background: var(--surface);
+    color: var(--text);
+    font-family: 'Outfit', sans-serif;
+    font-size: 14px;
+    cursor: pointer;
+    transition: all 0.2s;
+  }
+
+  .ctrl-btn:hover {
+    border-color: var(--accent);
+    background: rgba(108, 92, 231, 0.05);
+  }
+
+  /* Waveform */
+  .waveform {
+    display: flex; align-items: center; gap: 3px;
+    height: 40px;
+  }
+
+  .wave-bar {
+    width: 3px; height: 8px;
+    background: var(--accent);
+    border-radius: 2px;
+    transition: height 0.1s ease;
+  }
+
+  .mic-btn.recording ~ .waveform .wave-bar {
+    animation: wave 0.5s ease-in-out infinite alternate;
+  }
+
+  @keyframes wave {
+    from { height: 8px; }
+    to { height: 32px; }
+  }
+
+  /* Speed control */
+  .speed-control {
+    display: flex; align-items: center; gap: 12px;
+  }
+
+  .speed-slider {
+    -webkit-appearance: none; appearance: none;
+    width: 100%; height: 4px;
+    background: var(--border); border-radius: 2px;
+    outline: none;
+  }
+
+  .speed-slider::-webkit-slider-thumb {
+    -webkit-appearance: none; appearance: none;
+    width: 16px; height: 16px;
+    border-radius: 50%;
+    background: var(--accent);
+    cursor: pointer;
+  }
+
+  .speed-val {
+    font-family: 'Space Mono', monospace;
+    font-size: 13px; color: var(--accent);
+    min-width: 40px; text-align: right;
+  }
+
+  /* Empty state */
+  .empty-state {
+    display: flex; flex-direction: column;
+    align-items: center; justify-content: center;
+    height: 200px; color: var(--text-dim);
+    text-align: center; font-size: 14px; line-height: 1.8;
+  }
+
+  .empty-state svg { margin-bottom: 16px; opacity: 0.3; }
+
+  /* Responsive */
+  @media (max-width: 900px) {
+    .app {
+      grid-template-columns: 1fr;
+      grid-template-rows: auto 50vh auto auto;
+    }
+    .side-panel { border-left: none; border-top: 1px solid var(--border); max-height: 40vh; }
+  }
+</style>
+</head>
+<body>
+
+<div class="noise-overlay"></div>
+
+<div class="app">
+  <!-- Header -->
+  <header class="header">
+    <div class="logo">
+      <div class="logo-icon">🤟</div>
+      <span>SignSpeak</span>
+    </div>
+    <div class="status-badge">
+      <div class="status-dot" id="statusDot"></div>
+      <span id="statusText">Ожидание</span>
+    </div>
+  </header>
+
+  <!-- 3D Canvas -->
+  <div class="canvas-area" id="canvasArea">
+    <canvas id="avatarCanvas"></canvas>
+    <div class="gesture-label" id="gestureLabel">Привет</div>
+  </div>
+
+  <!-- Side Panel -->
+  <div class="side-panel">
+    <div class="panel-section">
+      <div class="section-title">⚡ Скорость жестов</div>
+      <div class="speed-control">
+        <input type="range" class="speed-slider" id="speedSlider" min="0.5" max="2" step="0.1" value="1">
+        <span class="speed-val" id="speedVal">1.0x</span>
+      </div>
+    </div>
+
+    <div class="panel-section">
+      <div class="section-title">🤲 Очередь жестов</div>
+      <div class="gesture-queue" id="gestureQueue">
+        <span style="color: var(--text-dim); font-size: 13px;">Нажмите микрофон для начала</span>
+      </div>
+    </div>
+
+    <div class="transcript-area" id="transcriptArea">
+      <div class="section-title">📝 Транскрипция</div>
+      <div class="empty-state" id="emptyState">
+        <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
+          <path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z"/>
+          <path d="M19 10v2a7 7 0 0 1-14 0v-2"/>
+          <line x1="12" y1="19" x2="12" y2="23"/>
+          <line x1="8" y1="23" x2="16" y2="23"/>
+        </svg>
+        Нажмите на микрофон<br>и начните говорить
+      </div>
+    </div>
+  </div>
+
+  <!-- Controls -->
+  <div class="controls">
+    <div class="waveform" id="waveform"></div>
+    <button class="mic-btn" id="micBtn" title="Начать запись">
+      <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+        <path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z"/>
+        <path d="M19 10v2a7 7 0 0 1-14 0v-2"/>
+        <line x1="12" y1="19" x2="12" y2="23"/>
+        <line x1="8" y1="23" x2="16" y2="23"/>
+      </svg>
+    </button>
+    <div class="waveform" id="waveform2"></div>
+    <button class="ctrl-btn" id="clearBtn">Очистить</button>
+    <button class="ctrl-btn" id="demoBtn">Демо</button>
+  </div>
+</div>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+<script>
+// ============================================================
+// SIGN LANGUAGE DICTIONARY — слово → описание жеста (поза рук)
+// ============================================================
+const SIGN_DICTIONARY = {
+  'привет':     { label: 'ПРИВЕТ',     type: 'wave',        desc: 'Помахать рукой' },
+  'здравствуйте':{ label: 'ЗДРАВСТВУЙТЕ', type: 'wave',    desc: 'Помахать рукой' },
+  'спасибо':    { label: 'СПАСИБО',    type: 'thankyou',    desc: 'Рука от подбородка вперёд' },
+  'пожалуйста': { label: 'ПОЖАЛУЙСТА', type: 'please',     desc: 'Круговое движение на груди' },
+  'да':         { label: 'ДА',         type: 'yes',         desc: 'Кивок кулаком' },
+  'нет':        { label: 'НЕТ',        type: 'no',          desc: 'Покачать головой и рукой' },
+  'я':          { label: 'Я',          type: 'me',          desc: 'Указать на себя' },
+  'ты':         { label: 'ТЫ',         type: 'you',         desc: 'Указать вперёд' },
+  'мы':         { label: 'МЫ',         type: 'we',          desc: 'Обе руки к себе' },
+  'хорошо':     { label: 'ХОРОШО',     type: 'good',        desc: 'Большой палец вверх' },
+  'плохо':      { label: 'ПЛОХО',      type: 'bad',         desc: 'Большой палец вниз' },
+  'дом':        { label: 'ДОМ',        type: 'house',       desc: 'Руки домиком' },
+  'есть':       { label: 'ЕСТЬ',       type: 'eat',         desc: 'Рука ко рту' },
+  'пить':       { label: 'ПИТЬ',       type: 'drink',       desc: 'Имитация стакана' },
+  'любовь':     { label: 'ЛЮБОВЬ',     type: 'love',        desc: 'Руки скрещены на груди' },
+  'люблю':      { label: 'ЛЮБЛЮ',      type: 'love',        desc: 'Руки скрещены на груди' },
+  'друг':       { label: 'ДРУГ',       type: 'friend',      desc: 'Сцепленные пальцы' },
+  'помощь':     { label: 'ПОМОЩЬ',     type: 'help',        desc: 'Кулак на ладони, поднять' },
+  'помоги':     { label: 'ПОМОГИ',     type: 'help',        desc: 'Кулак на ладони, поднять' },
+  'время':      { label: 'ВРЕМЯ',      type: 'time',        desc: 'Указать на запястье' },
+  'работа':     { label: 'РАБОТА',     type: 'work',        desc: 'Кулаки стучат друг о друга' },
+  'учиться':    { label: 'УЧИТЬСЯ',    type: 'learn',       desc: 'Рука от книги ко лбу' },
+  'понимать':   { label: 'ПОНИМАТЬ',   type: 'understand',  desc: 'Щелчок у виска' },
+  'понял':      { label: 'ПОНЯЛ',      type: 'understand',  desc: 'Щелчок у виска' },
+  'как':        { label: 'КАК',        type: 'how',         desc: 'Ладони вверх, вопрос' },
+  'что':        { label: 'ЧТО',        type: 'what',        desc: 'Ладони вверх, покачать' },
+  'где':        { label: 'ГДЕ',        type: 'where',       desc: 'Указательный палец качается' },
+  'когда':      { label: 'КОГДА',      type: 'when',        desc: 'Вращение указательного пальца' },
+  'мир':        { label: 'МИР',        type: 'peace',       desc: 'Знак мира — V' },
+  'извините':   { label: 'ИЗВИНИТЕ',   type: 'sorry',       desc: 'Кулак кругом на груди' },
+  'прости':     { label: 'ПРОСТИ',     type: 'sorry',       desc: 'Кулак кругом на груди' },
+  'стоп':       { label: 'СТОП',       type: 'stop',        desc: 'Ладонь вперёд' },
+  'идти':       { label: 'ИДТИ',       type: 'go',          desc: 'Пальцы шагают' },
+  'видеть':     { label: 'ВИДЕТЬ',     type: 'see',         desc: 'V от глаз вперёд' },
+  'слышать':    { label: 'СЛЫШАТЬ',    type: 'hear',        desc: 'Рука к уху' },
+  'думать':     { label: 'ДУМАТЬ',     type: 'think',       desc: 'Палец к виску' },
+  'знать':      { label: 'ЗНАТЬ',      type: 'think',       desc: 'Палец к виску' },
+  'хотеть':     { label: 'ХОТЕТЬ',     type: 'want',        desc: 'Руки к себе тянут' },
+  'хочу':       { label: 'ХОЧУ',       type: 'want',        desc: 'Руки к себе тянут' },
+  'можно':      { label: 'МОЖНО',      type: 'can',         desc: 'Кулаки вниз вместе' },
+  'нельзя':     { label: 'НЕЛЬЗЯ',     type: 'cant',        desc: 'Скрещённые руки' },
+};
+
+// Фоллбэк: для неизвестных слов — дактильная азбука (буквенная)
+function getSignForWord(word) {
+  const lower = word.toLowerCase().replace(/[^а-яёa-z]/g, '');
+  if (SIGN_DICTIONARY[lower]) return SIGN_DICTIONARY[lower];
+  return { label: word.toUpperCase(), type: 'spell', desc: 'Побуквенно: ' + lower };
+}
+
+// ============================================================
+// THREE.JS — 3D АВАТАР
+// ============================================================
+class AvatarScene {
+  constructor(canvas) {
+    this.canvas = canvas;
+    this.clock = new THREE.Clock();
+    this.currentPose = 'idle';
+    this.poseProgress = 0;
+    this.targetPose = 'idle';
+    this.animSpeed = 1;
+
+    this.init();
+    this.createAvatar();
+    this.animate();
+  }
+
+  init() {
+    const area = document.getElementById('canvasArea');
+    const w = area.clientWidth;
+    const h = area.clientHeight;
+
+    this.scene = new THREE.Scene();
+    this.scene.fog = new THREE.FogExp2(0x0a0a0f, 0.008);
+
+    this.camera = new THREE.PerspectiveCamera(45, w / h, 0.1, 100);
+    this.camera.position.set(0, 1.2, 4);
+    this.camera.lookAt(0, 0.8, 0);
+
+    this.renderer = new THREE.WebGLRenderer({ canvas: this.canvas, antialias: true, alpha: true });
+    this.renderer.setSize(w, h);
+    this.renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+    this.renderer.shadowMap.enabled = true;
+    this.renderer.toneMapping = THREE.ACESFilmicToneMapping;
+    this.renderer.toneMappingExposure = 1.2;
+
+    // Lights
+    const ambientLight = new THREE.AmbientLight(0x404060, 0.6);
+    this.scene.add(ambientLight);
+
+    const mainLight = new THREE.DirectionalLight(0xffffff, 1.0);
+    mainLight.position.set(3, 5, 4);
+    mainLight.castShadow = true;
+    this.scene.add(mainLight);
+
+    const fillLight = new THREE.DirectionalLight(0x6c5ce7, 0.4);
+    fillLight.position.set(-3, 2, -2);
+    this.scene.add(fillLight);
+
+    const rimLight = new THREE.DirectionalLight(0x00cec9, 0.3);
+    rimLight.position.set(0, 3, -4);
+    this.scene.add(rimLight);
+
+    // Ground
+    const groundGeo = new THREE.CircleGeometry(3, 64);
+    const groundMat = new THREE.MeshStandardMaterial({ 
+      color: 0x15152a, roughness: 0.9, metalness: 0.1 
+    });
+    const ground = new THREE.Mesh(groundGeo, groundMat);
+    ground.rotation.x = -Math.PI / 2;
+    ground.receiveShadow = true;
+    this.scene.add(ground);
+
+    // Grid
+    const gridHelper = new THREE.GridHelper(6, 20, 0x1e1e2e, 0x1e1e2e);
+    gridHelper.position.y = 0.01;
+    this.scene.add(gridHelper);
+
+    window.addEventListener('resize', () => this.onResize());
+  }
+
+  createAvatar() {
+    this.avatar = new THREE.Group();
+
+    const skinMat = new THREE.MeshStandardMaterial({ 
+      color: 0xf4c99e, roughness: 0.6, metalness: 0.05 
+    });
+    const clothMat = new THREE.MeshStandardMaterial({ 
+      color: 0x2d2d44, roughness: 0.7, metalness: 0.1 
+    });
+    const hairMat = new THREE.MeshStandardMaterial({ 
+      color: 0x2a1a0a, roughness: 0.8, metalness: 0.05 
+    });
+    const eyeMat = new THREE.MeshStandardMaterial({ 
+      color: 0x1a1a2e, roughness: 0.3 
+    });
+    const shoeMat = new THREE.MeshStandardMaterial({ 
+      color: 0x1a1a2e, roughness: 0.5 
+    });
+
+    // Body (torso)
+    const torso = new THREE.Mesh(
+      new THREE.CylinderGeometry(0.25, 0.22, 0.6, 16),
+      clothMat
+    );
+    torso.position.y = 1.0;
+    torso.castShadow = true;
+    this.avatar.add(torso);
+    this.torso = torso;
+
+    // Head
+    const head = new THREE.Mesh(
+      new THREE.SphereGeometry(0.2, 32, 32),
+      skinMat
+    );
+    head.position.y = 1.55;
+    head.castShadow = true;
+    this.avatar.add(head);
+    this.head = head;
+
+    // Hair
+    const hair = new THREE.Mesh(
+      new THREE.SphereGeometry(0.21, 32, 16, 0, Math.PI * 2, 0, Math.PI * 0.6),
+      hairMat
+    );
+    hair.position.y = 1.58;
+    this.avatar.add(hair);
+
+    // Eyes
+    const eyeL = new THREE.Mesh(new THREE.SphereGeometry(0.03, 16, 16), eyeMat);
+    eyeL.position.set(-0.07, 1.57, 0.17);
+    this.avatar.add(eyeL);
+    const eyeR = new THREE.Mesh(new THREE.SphereGeometry(0.03, 16, 16), eyeMat);
+    eyeR.position.set(0.07, 1.57, 0.17);
+    this.avatar.add(eyeR);
+    this.eyeL = eyeL;
+    this.eyeR = eyeR;
+
+    // Neck
+    const neck = new THREE.Mesh(
+      new THREE.CylinderGeometry(0.06, 0.08, 0.12, 12),
+      skinMat
+    );
+    neck.position.y = 1.37;
+    this.avatar.add(neck);
+
+    // Shoulders
+    const shoulderGeo = new THREE.SphereGeometry(0.08, 16, 16);
+
+    // Left arm
+    this.shoulderL = new THREE.Mesh(shoulderGeo, clothMat);
+    this.shoulderL.position.set(-0.35, 1.25, 0);
+    this.avatar.add(this.shoulderL);
+
+    this.upperArmL = new THREE.Mesh(
+      new THREE.CylinderGeometry(0.05, 0.045, 0.3, 12),
+      clothMat
+    );
+    this.upperArmL.position.set(-0.38, 1.05, 0);
+    this.avatar.add(this.upperArmL);
+
+    this.elbowL = new THREE.Mesh(new THREE.SphereGeometry(0.05, 12, 12), skinMat);
+    this.elbowL.position.set(-0.38, 0.88, 0);
+    this.avatar.add(this.elbowL);
+
+    this.forearmL = new THREE.Mesh(
+      new THREE.CylinderGeometry(0.04, 0.035, 0.28, 12),
+      skinMat
+    );
+    this.forearmL.position.set(-0.38, 0.72, 0);
+    this.avatar.add(this.forearmL);
+
+    this.handL = new THREE.Mesh(
+      new THREE.SphereGeometry(0.055, 12, 12),
+      skinMat
+    );
+    this.handL.position.set(-0.38, 0.56, 0);
+    this.avatar.add(this.handL);
+
+    // Right arm
+    this.shoulderR = new THREE.Mesh(shoulderGeo, clothMat);
+    this.shoulderR.position.set(0.35, 1.25, 0);
+    this.avatar.add(this.shoulderR);
+
+    this.upperArmR = new THREE.Mesh(
+      new THREE.CylinderGeometry(0.05, 0.045, 0.3, 12),
+      clothMat
+    );
+    this.upperArmR.position.set(0.38, 1.05, 0);
+    this.avatar.add(this.upperArmR);
+
+    this.elbowR = new THREE.Mesh(new THREE.SphereGeometry(0.05, 12, 12), skinMat);
+    this.elbowR.position.set(0.38, 0.88, 0);
+    this.avatar.add(this.elbowR);
+
+    this.forearmR = new THREE.Mesh(
+      new THREE.CylinderGeometry(0.04, 0.035, 0.28, 12),
+      skinMat
+    );
+    this.forearmR.position.set(0.38, 0.72, 0);
+    this.avatar.add(this.forearmR);
+
+    this.handR = new THREE.Mesh(
+      new THREE.SphereGeometry(0.055, 12, 12),
+      skinMat
+    );
+    this.handR.position.set(0.38, 0.56, 0);
+    this.avatar.add(this.handR);
+
+    // Hips
+    const hips = new THREE.Mesh(
+      new THREE.CylinderGeometry(0.22, 0.2, 0.15, 16),
+      clothMat
+    );
+    hips.position.y = 0.65;
+    this.avatar.add(hips);
+
+    // Legs
+    const legMat = new THREE.MeshStandardMaterial({ color: 0x222238, roughness: 0.7 });
+    
+    const legL = new THREE.Mesh(new THREE.CylinderGeometry(0.06, 0.055, 0.55, 12), legMat);
+    legL.position.set(-0.1, 0.32, 0);
+    this.avatar.add(legL);
+
+    const legR = new THREE.Mesh(new THREE.CylinderGeometry(0.06, 0.055, 0.55, 12), legMat);
+    legR.position.set(0.1, 0.32, 0);
+    this.avatar.add(legR);
+
+    // Feet
+    const footL = new THREE.Mesh(new THREE.SphereGeometry(0.06, 12, 8), shoeMat);
+    footL.position.set(-0.1, 0.06, 0.03);
+    footL.scale.set(1, 0.5, 1.4);
+    this.avatar.add(footL);
+
+    const footR = new THREE.Mesh(new THREE.SphereGeometry(0.06, 12, 8), shoeMat);
+    footR.position.set(0.1, 0.06, 0.03);
+    footR.scale.set(1, 0.5, 1.4);
+    this.avatar.add(footR);
+
+    this.scene.add(this.avatar);
+
+    // Store default positions for all parts
+    this.defaultPose = {
+      headY: 1.55, headRotX: 0, headRotZ: 0,
+      // Left arm chain
+      upperArmLPos: [-0.38, 1.05, 0], upperArmLRot: [0, 0, 0],
+      forearmLPos: [-0.38, 0.72, 0], forearmLRot: [0, 0, 0],
+      handLPos: [-0.38, 0.56, 0], handLRot: [0, 0, 0],
+      elbowLPos: [-0.38, 0.88, 0],
+      shoulderLPos: [-0.35, 1.25, 0],
+      // Right arm chain
+      upperArmRPos: [0.38, 1.05, 0], upperArmRRot: [0, 0, 0],
+      forearmRPos: [0.38, 0.72, 0], forearmRRot: [0, 0, 0],
+      handRPos: [0.38, 0.56, 0], handRRot: [0, 0, 0],
+      elbowRPos: [0.38, 0.88, 0],
+      shoulderRPos: [0.35, 1.25, 0],
+    };
+  }
+
+  // Poses: each pose is a set of target positions for body parts
+  getPoseTargets(poseType) {
+    const d = this.defaultPose;
+    switch(poseType) {
+      case 'wave':
+        return {
+          handRPos: [0.55, 1.7, 0.2],
+          forearmRPos: [0.48, 1.55, 0.15],
+          elbowRPos: [0.42, 1.4, 0.1],
+          upperArmRPos: [0.4, 1.25, 0.05],
+          handRRot: [0, 0, 0.3],
+          headRotZ: 0.05,
+          oscillateHandR: true,
+        };
+      case 'thankyou':
+        return {
+          handRPos: [0.1, 1.45, 0.25],
+          forearmRPos: [0.2, 1.3, 0.2],
+          elbowRPos: [0.3, 1.15, 0.1],
+          headRotX: -0.1,
+        };
+      case 'yes':
+        return {
+          handRPos: [0.3, 1.2, 0.15],
+          forearmRPos: [0.35, 1.05, 0.1],
+          headNod: true,
+        };
+      case 'no':
+        return {
+          headShake: true,
+          handRPos: [0.5, 1.1, 0.2],
+          forearmRPos: [0.45, 0.95, 0.15],
+        };
+      case 'me':
+        return {
+          handRPos: [0.05, 1.05, 0.25],
+          forearmRPos: [0.15, 0.95, 0.2],
+          elbowRPos: [0.3, 0.9, 0.1],
+        };
+      case 'you':
+        return {
+          handRPos: [0.2, 1.1, 0.5],
+          forearmRPos: [0.25, 1.0, 0.35],
+          elbowRPos: [0.33, 0.95, 0.15],
+        };
+      case 'good':
+        return {
+          handRPos: [0.35, 1.4, 0.3],
+          forearmRPos: [0.36, 1.2, 0.2],
+          elbowRPos: [0.37, 1.05, 0.1],
+        };
+      case 'bad':
+        return {
+          handRPos: [0.35, 0.7, 0.3],
+          forearmRPos: [0.36, 0.85, 0.2],
+          elbowRPos: [0.37, 0.95, 0.1],
+        };
+      case 'love':
+        return {
+          handRPos: [0.1, 1.1, 0.15],
+          handLPos: [-0.1, 1.1, 0.15],
+          forearmRPos: [0.2, 1.0, 0.1],
+          forearmLPos: [-0.2, 1.0, 0.1],
+          elbowRPos: [0.3, 0.95, 0.05],
+          elbowLPos: [-0.3, 0.95, 0.05],
+          headRotX: -0.08,
+        };
+      case 'help':
+        return {
+          handRPos: [0.1, 1.15, 0.3],
+          handLPos: [-0.05, 1.0, 0.25],
+          forearmRPos: [0.2, 1.0, 0.2],
+          forearmLPos: [-0.15, 0.9, 0.18],
+          riseAnimation: true,
+        };
+      case 'think':
+        return {
+          handRPos: [0.15, 1.55, 0.15],
+          forearmRPos: [0.25, 1.4, 0.1],
+          elbowRPos: [0.32, 1.25, 0.05],
+          headRotX: -0.05, headRotZ: 0.05,
+        };
+      case 'house':
+        return {
+          handRPos: [0.2, 1.5, 0.2],
+          handLPos: [-0.2, 1.5, 0.2],
+          forearmRPos: [0.25, 1.35, 0.15],
+          forearmLPos: [-0.25, 1.35, 0.15],
+          elbowRPos: [0.3, 1.2, 0.1],
+          elbowLPos: [-0.3, 1.2, 0.1],
+        };
+      case 'eat':
+        return {
+          handRPos: [0.05, 1.45, 0.3],
+          forearmRPos: [0.15, 1.3, 0.2],
+          elbowRPos: [0.28, 1.15, 0.1],
+        };
+      case 'drink':
+        return {
+          handRPos: [0.08, 1.5, 0.25],
+          forearmRPos: [0.15, 1.35, 0.18],
+          headRotX: 0.15,
+        };
+      case 'please':
+        return {
+          handRPos: [0.05, 1.1, 0.2],
+          forearmRPos: [0.15, 1.0, 0.15],
+          circleAnimation: true,
+        };
+      case 'sorry':
+        return {
+          handRPos: [0.05, 1.1, 0.2],
+          forearmRPos: [0.15, 1.0, 0.15],
+          circleAnimation: true,
+          headRotX: -0.1,
+        };
+      case 'stop':
+        return {
+          handRPos: [0.3, 1.3, 0.4],
+          forearmRPos: [0.32, 1.15, 0.25],
+          elbowRPos: [0.35, 1.0, 0.1],
+        };
+      case 'peace':
+        return {
+          handRPos: [0.3, 1.5, 0.3],
+          forearmRPos: [0.33, 1.35, 0.2],
+          elbowRPos: [0.35, 1.2, 0.1],
+        };
+      case 'see':
+        return {
+          handRPos: [0.2, 1.5, 0.35],
+          forearmRPos: [0.25, 1.45, 0.25],
+          elbowRPos: [0.32, 1.3, 0.1],
+        };
+      case 'hear':
+        return {
+          handRPos: [0.2, 1.55, 0.05],
+          forearmRPos: [0.28, 1.4, 0.03],
+          elbowRPos: [0.33, 1.25, 0.02],
+          headRotZ: -0.1,
+        };
+      case 'want':
+        return {
+          handRPos: [0.15, 1.05, 0.3],
+          handLPos: [-0.15, 1.05, 0.3],
+          forearmRPos: [0.22, 0.95, 0.2],
+          forearmLPos: [-0.22, 0.95, 0.2],
+        };
+      case 'we':
+        return {
+          handRPos: [0.15, 1.1, 0.2],
+          handLPos: [-0.15, 1.1, 0.2],
+          forearmRPos: [0.22, 1.0, 0.15],
+          forearmLPos: [-0.22, 1.0, 0.15],
+        };
+      case 'friend':
+        return {
+          handRPos: [0.05, 1.0, 0.3],
+          handLPos: [-0.05, 1.0, 0.3],
+          forearmRPos: [0.15, 0.92, 0.2],
+          forearmLPos: [-0.15, 0.92, 0.2],
+        };
+      case 'work':
+        return {
+          handRPos: [0.15, 1.0, 0.25],
+          handLPos: [-0.15, 0.95, 0.25],
+          forearmRPos: [0.22, 0.92, 0.18],
+          forearmLPos: [-0.22, 0.88, 0.18],
+          bumpAnimation: true,
+        };
+      case 'learn':
+        return {
+          handRPos: [0.1, 1.5, 0.2],
+          forearmRPos: [0.2, 1.35, 0.15],
+          handLPos: [-0.15, 0.9, 0.25],
+          forearmLPos: [-0.2, 0.85, 0.2],
+        };
+      case 'how':
+      case 'what':
+        return {
+          handRPos: [0.25, 1.15, 0.35],
+          handLPos: [-0.25, 1.15, 0.35],
+          forearmRPos: [0.28, 1.05, 0.25],
+          forearmLPos: [-0.28, 1.05, 0.25],
+          headRotZ: 0.05,
+        };
+      case 'where':
+        return {
+          handRPos: [0.25, 1.3, 0.35],
+          forearmRPos: [0.28, 1.15, 0.25],
+          swayAnimation: true,
+        };
+      case 'when':
+        return {
+          handRPos: [0.2, 1.2, 0.3],
+          forearmRPos: [0.25, 1.1, 0.2],
+          circleAnimation: true,
+        };
+      case 'go':
+        return {
+          handRPos: [0.2, 0.9, 0.35],
+          forearmRPos: [0.25, 0.82, 0.25],
+          walkFingers: true,
+        };
+      case 'can':
+        return {
+          handRPos: [0.15, 0.95, 0.2],
+          handLPos: [-0.15, 0.95, 0.2],
+          forearmRPos: [0.2, 0.85, 0.15],
+          forearmLPos: [-0.2, 0.85, 0.15],
+        };
+      case 'cant':
+        return {
+          handRPos: [0.15, 1.15, 0.2],
+          handLPos: [-0.15, 1.15, 0.2],
+          forearmRPos: [0.2, 1.05, 0.15],
+          forearmLPos: [-0.2, 1.05, 0.15],
+        };
+      case 'time':
+        return {
+          handRPos: [-0.25, 1.05, 0.2],
+          forearmRPos: [-0.1, 0.95, 0.15],
+          elbowRPos: [0.1, 0.9, 0.05],
+        };
+      case 'spell':
+        return {
+          handRPos: [0.3, 1.4, 0.3],
+          forearmRPos: [0.33, 1.25, 0.2],
+          elbowRPos: [0.35, 1.1, 0.1],
+          fingerSpell: true,
+        };
+      default:
+        return {};
+    }
+  }
+
+  setPose(poseType) {
+    this.targetPose = poseType;
+    this.poseProgress = 0;
+    this.poseTargets = this.getPoseTargets(poseType);
+    this.poseStartTime = this.clock.getElapsedTime();
+  }
+
+  lerpVec(mesh, prop, target, t) {
+    if (!target) return;
+    mesh.position[prop === 'x' ? 'x' : prop === 'y' ? 'y' : 'z'] += 
+      (target - mesh.position[prop === 'x' ? 'x' : prop === 'y' ? 'y' : 'z']) * t;
+  }
+
+  lerpTo(mesh, targetArr, t) {
+    if (!targetArr) return;
+    mesh.position.x += (targetArr[0] - mesh.position.x) * t;
+    mesh.position.y += (targetArr[1] - mesh.position.y) * t;
+    mesh.position.z += (targetArr[2] - mesh.position.z) * t;
+  }
+
+  lerpDefault(mesh, defaultArr, t) {
+    mesh.position.x += (defaultArr[0] - mesh.position.x) * t;
+    mesh.position.y += (defaultArr[1] - mesh.position.y) * t;
+    mesh.position.z += (defaultArr[2] - mesh.position.z) * t;
+  }
+
+  animate() {
+    requestAnimationFrame(() => this.animate());
+
+    const t = this.clock.getElapsedTime();
+    const dt = this.clock.getDelta();
+    const lerpSpeed = 0.08 * this.animSpeed;
+    const d = this.defaultPose;
+    const p = this.poseTargets || {};
+
+    // Idle breathing
+    const breathe = Math.sin(t * 1.5) * 0.005;
+    this.torso.position.y = 1.0 + breathe;
+
+    // Subtle body sway
+    this.avatar.rotation.y += (Math.sin(t * 0.3) * 0.02 - this.avatar.rotation.y) * 0.02;
+
+    // Eye blink
+    const blinkPhase = t % 4;
+    const blinkScale = blinkPhase < 0.15 ? 0.1 : 1;
+    this.eyeL.scale.y = blinkScale;
+    this.eyeR.scale.y = blinkScale;
+
+    // Head
+    const headTargetX = p.headRotX || 0;
+    const headTargetZ = p.headRotZ || 0;
+    let headNodOffset = 0;
+    let headShakeOffset = 0;
+    if (p.headNod) headNodOffset = Math.sin(t * 6) * 0.12;
+    if (p.headShake) headShakeOffset = Math.sin(t * 6) * 0.15;
+    this.head.rotation.x += (headTargetX + headNodOffset - this.head.rotation.x) * lerpSpeed;
+    this.head.rotation.z += (headTargetZ + headShakeOffset - this.head.rotation.z) * lerpSpeed;
+
+    // Right arm
+    this.lerpTo(this.handR, p.handRPos || d.handRPos, lerpSpeed);
+    this.lerpTo(this.forearmR, p.forearmRPos || d.forearmRPos, lerpSpeed);
+    this.lerpTo(this.elbowR, p.elbowRPos || d.elbowRPos, lerpSpeed);
+    this.lerpTo(this.upperArmR, p.upperArmRPos || d.upperArmRPos, lerpSpeed);
+
+    // Left arm
+    this.lerpTo(this.handL, p.handLPos || d.handLPos, lerpSpeed);
+    this.lerpTo(this.forearmL, p.forearmLPos || d.forearmLPos, lerpSpeed);
+    this.lerpTo(this.elbowL, p.elbowLPos || d.elbowLPos, lerpSpeed);
+
+    // Special animations
+    if (p.oscillateHandR) {
+      this.handR.position.x += Math.sin(t * 8) * 0.003;
+      this.handR.rotation.z = Math.sin(t * 8) * 0.4;
+    }
+
+    if (p.circleAnimation) {
+      const cr = 0.03;
+      this.handR.position.x += Math.sin(t * 4) * cr;
+      this.handR.position.y += Math.cos(t * 4) * cr;
+    }
+
+    if (p.bumpAnimation) {
+      const bump = Math.abs(Math.sin(t * 5)) * 0.03;
+      this.handR.position.y += bump;
+    }
+
+    if (p.swayAnimation) {
+      this.handR.position.x += Math.sin(t * 5) * 0.04;
+    }
+
+    if (p.walkFingers) {
+      this.handR.position.y += Math.sin(t * 8) * 0.02;
+      this.handR.position.z += Math.abs(Math.sin(t * 8)) * 0.02;
+    }
+
+    if (p.riseAnimation) {
+      const rise = Math.sin(t * 3) * 0.04;
+      this.handR.position.y += rise;
+      this.handL.position.y += rise;
+    }
+
+    if (p.fingerSpell) {
+      this.handR.rotation.z = Math.sin(t * 4) * 0.3;
+      this.handR.rotation.x = Math.cos(t * 3) * 0.2;
+    }
+
+    this.renderer.render(this.scene, this.camera);
+  }
+
+  onResize() {
+    const area = document.getElementById('canvasArea');
+    const w = area.clientWidth;
+    const h = area.clientHeight;
+    this.camera.aspect = w / h;
+    this.camera.updateProjectionMatrix();
+    this.renderer.setSize(w, h);
+  }
+}
+
+// ============================================================
+// SPEECH RECOGNITION
+// ============================================================
+class SpeechRecognizer {
+  constructor(onResult, onInterim) {
+    this.onResult = onResult;
+    this.onInterim = onInterim;
+    this.isListening = false;
+
+    const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+    if (!SpeechRecognition) {
+      console.warn('Speech Recognition not supported');
+      return;
+    }
+
+    this.recognition = new SpeechRecognition();
+    this.recognition.continuous = true;
+    this.recognition.interimResults = true;
+    this.recognition.lang = 'ru-RU';
+
+    this.recognition.onresult = (event) => {
+      let interimTranscript = '';
+      let finalTranscript = '';
+
+      for (let i = event.resultIndex; i < event.results.length; i++) {
+        const transcript = event.results[i][0].transcript;
+        if (event.results[i].isFinal) {
+          finalTranscript += transcript;
+        } else {
+          interimTranscript += transcript;
+        }
+      }
+
+      if (finalTranscript) this.onResult(finalTranscript.trim());
+      if (interimTranscript) this.onInterim(interimTranscript.trim());
+    };
+
+    this.recognition.onerror = (event) => {
+      console.error('Speech error:', event.error);
+      if (event.error === 'no-speech') {
+        // Restart
+        if (this.isListening) {
+          this.recognition.stop();
+          setTimeout(() => {
+            if (this.isListening) this.recognition.start();
+          }, 100);
+        }
+      }
+    };
+
+    this.recognition.onend = () => {
+      if (this.isListening) {
+        setTimeout(() => {
+          try { this.recognition.start(); } catch(e) {}
+        }, 100);
+      }
+    };
+  }
+
+  start() {
+    if (!this.recognition) return false;
+    this.isListening = true;
+    try {
+      this.recognition.start();
+      return true;
+    } catch(e) {
+      return false;
+    }
+  }
+
+  stop() {
+    this.isListening = false;
+    if (this.recognition) this.recognition.stop();
+  }
+}
+
+// ============================================================
+// APP CONTROLLER
+// ============================================================
+class SignLanguageApp {
+  constructor() {
+    this.avatar = new AvatarScene(document.getElementById('avatarCanvas'));
+    this.gestureQueue = [];
+    this.isPlaying = false;
+    this.currentGestureIndex = -1;
+    this.speed = 1;
+    this.transcriptItems = [];
+
+    this.initUI();
+    this.initSpeech();
+  }
+
+  initUI() {
+    // Mic button
+    this.micBtn = document.getElementById('micBtn');
+    this.statusDot = document.getElementById('statusDot');
+    this.statusText = document.getElementById('statusText');
+    this.gestureLabel = document.getElementById('gestureLabel');
+    this.gestureQueueEl = document.getElementById('gestureQueue');
+    this.transcriptArea = document.getElementById('transcriptArea');
+    this.emptyState = document.getElementById('emptyState');
+
+    this.micBtn.addEventListener('click', () => this.toggleRecording());
+
+    // Speed slider
+    const speedSlider = document.getElementById('speedSlider');
+    const speedVal = document.getElementById('speedVal');
+    speedSlider.addEventListener('input', (e) => {
+      this.speed = parseFloat(e.target.value);
+      speedVal.textContent = this.speed.toFixed(1) + 'x';
+      this.avatar.animSpeed = this.speed;
+    });
+
+    // Clear button
+    document.getElementById('clearBtn').addEventListener('click', () => this.clear());
+
+    // Demo button
+    document.getElementById('demoBtn').addEventListener('click', () => this.runDemo());
+
+    // Create waveform bars
+    [document.getElementById('waveform'), document.getElementById('waveform2')].forEach(wf => {
+      for (let i = 0; i < 12; i++) {
+        const bar = document.createElement('div');
+        bar.className = 'wave-bar';
+        bar.style.animationDelay = (i * 0.05) + 's';
+        wf.appendChild(bar);
+      }
+    });
+  }
+
+  initSpeech() {
+    this.recognizer = new SpeechRecognizer(
+      (text) => this.onFinalResult(text),
+      (text) => this.onInterimResult(text)
+    );
+  }
+
+  toggleRecording() {
+    if (this.isRecording) {
+      this.stopRecording();
+    } else {
+      this.startRecording();
+    }
+  }
+
+  startRecording() {
+    const started = this.recognizer.start();
+    if (!started) {
+      alert('Распознавание речи не поддерживается в вашем браузере. Попробуйте Chrome.');
+      return;
+    }
+    this.isRecording = true;
+    this.micBtn.classList.add('recording');
+    this.statusDot.classList.add('active');
+    this.statusText.textContent = 'Слушаю...';
+    this.emptyState.style.display = 'none';
+
+    // Animate waveform
+    document.querySelectorAll('.wave-bar').forEach(bar => {
+      bar.style.animation = `wave ${0.3 + Math.random() * 0.4}s ease-in-out infinite alternate`;
+    });
+  }
+
+  stopRecording() {
+    this.recognizer.stop();
+    this.isRecording = false;
+    this.micBtn.classList.remove('recording');
+    this.statusDot.classList.remove('active');
+    this.statusText.textContent = 'Остановлено';
+    document.querySelectorAll('.wave-bar').forEach(bar => {
+      bar.style.animation = 'none';
+      bar.style.height = '8px';
+    });
+  }
+
+  onInterimResult(text) {
+    // Update live transcript display
+    this.updateLiveTranscript(text, true);
+  }
+
+  onFinalResult(text) {
+    this.addTranscriptItem(text);
+    this.processText(text);
+  }
+
+  addTranscriptItem(text) {
+    const now = new Date();
+    const timeStr = now.getHours().toString().padStart(2,'0') + ':' + 
+                    now.getMinutes().toString().padStart(2,'0') + ':' +
+                    now.getSeconds().toString().padStart(2,'0');
+    
+    const item = document.createElement('div');
+    item.className = 'transcript-item';
+    item.innerHTML = `<div class="time">${timeStr}</div><div class="words">${text}</div>`;
+    
+    // Remove live transcript if exists
+    const live = this.transcriptArea.querySelector('.live-transcript');
+    if (live) live.remove();
+
+    this.transcriptArea.appendChild(item);
+    this.transcriptArea.scrollTop = this.transcriptArea.scrollHeight;
+    this.transcriptItems.push(item);
+  }
+
+  updateLiveTranscript(text, isLive) {
+    let live = this.transcriptArea.querySelector('.live-transcript');
+    if (!live) {
+      live = document.createElement('div');
+      live.className = 'transcript-item active live-transcript';
+      this.transcriptArea.appendChild(live);
+    }
+    live.innerHTML = `<div class="time">⏺ Сейчас</div><div class="words" style="opacity:0.6">${text}</div>`;
+    this.transcriptArea.scrollTop = this.transcriptArea.scrollHeight;
+  }
+
+  processText(text) {
+    const words = text.toLowerCase().replace(/[.,!?;:]/g, '').split(/\s+/).filter(w => w.length > 0);
+    const signs = [];
+
+    for (const word of words) {
+      const sign = getSignForWord(word);
+      signs.push({ word, sign });
+    }
+
+    // Add to queue
+    this.gestureQueue.push(...signs);
+    this.updateQueueDisplay();
+
+    if (!this.isPlaying) {
+      this.playNextGesture();
+    }
+  }
+
+  updateQueueDisplay() {
+    this.gestureQueueEl.innerHTML = '';
+    const displayQueue = this.gestureQueue.slice(0, 20);
+    displayQueue.forEach((item, i) => {
+      const tag = document.createElement('span');
+      tag.className = 'gesture-tag' + (i === 0 && this.isPlaying ? ' playing' : '');
+      tag.textContent = item.sign.label;
+      this.gestureQueueEl.appendChild(tag);
+    });
+    if (this.gestureQueue.length > 20) {
+      const more = document.createElement('span');
+      more.className = 'gesture-tag';
+      more.textContent = `+${this.gestureQueue.length - 20}`;
+      this.gestureQueueEl.appendChild(more);
+    }
+  }
+
+  async playNextGesture() {
+    if (this.gestureQueue.length === 0) {
+      this.isPlaying = false;
+      this.avatar.setPose('idle');
+      this.gestureLabel.classList.remove('visible');
+      return;
+    }
+
+    this.isPlaying = true;
+    const item = this.gestureQueue.shift();
+    this.updateQueueDisplay();
+
+    // Show gesture label
+    this.gestureLabel.textContent = item.sign.label + ' — ' + item.sign.desc;
+    this.gestureLabel.classList.add('visible');
+
+    // Highlight current word in transcript
+    this.highlightWord(item.word);
+
+    // Set avatar pose
+    this.avatar.setPose(item.sign.type);
+
+    // Duration based on speed
+    const duration = (item.sign.type === 'spell' ? 1500 : 1200) / this.speed;
+
+    await this.delay(duration);
+
+    // Return to idle briefly
+    this.avatar.setPose('idle');
+    await this.delay(200 / this.speed);
+
+    this.playNextGesture();
+  }
+
+  highlightWord(word) {
+    // Highlight in latest transcript item
+    if (this.transcriptItems.length > 0) {
+      const lastItem = this.transcriptItems[this.transcriptItems.length - 1];
+      const wordsEl = lastItem.querySelector('.words');
+      const text = wordsEl.textContent;
+      const regex = new RegExp(`(${word})`, 'gi');
+      wordsEl.innerHTML = text.replace(regex, '<span class="current-word">$1</span>');
+    }
+  }
+
+  clear() {
+    this.gestureQueue = [];
+    this.transcriptItems = [];
+    this.isPlaying = false;
+    this.avatar.setPose('idle');
+    this.gestureLabel.classList.remove('visible');
+    this.gestureQueueEl.innerHTML = '<span style="color: var(--text-dim); font-size: 13px;">Нажмите микрофон для начала</span>';
+    
+    // Clear transcript area but keep the title
+    const items = this.transcriptArea.querySelectorAll('.transcript-item, .live-transcript');
+    items.forEach(item => item.remove());
+    this.emptyState.style.display = 'flex';
+  }
+
+  async runDemo() {
+    const demoText = 'привет я хочу учиться понимать язык жестов спасибо за помощь';
+    this.emptyState.style.display = 'none';
+    this.addTranscriptItem(demoText);
+    this.processText(demoText);
+  }
+
+  delay(ms) {
+    return new Promise(resolve => setTimeout(resolve, ms));
+  }
+}
+
+// ============================================================
+// INIT
+// ============================================================
+window.addEventListener('DOMContentLoaded', () => {
+  new SignLanguageApp();
+});
+</script>
+</body>
+</html>
